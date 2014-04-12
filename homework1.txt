@@ -1,0 +1,161 @@
+create table staff(id int not null primary key unique, parent int not null, name varchar(32));
+1. Добавить сотрудника.
+delimiter //
+create function nameid(myname varchar(32)) RETURNS int
+begin
+	declare res int;
+	select min(id) into res from staff where name = myname;
+	return res;
+end//
+create function calcid() RETURNS int
+begin
+	declare res int;
+	select count(*) into res from staff;
+	return res+1;
+end //
+create procedure addperson(myname varchar(32), bossname varchar(32))
+begin
+	insert staff values(calcid(), nameid(bossname), myname);
+end//
+процедура addperson добавляет myname в отдел к начальнику bossname;
+
+2. Перевести сотрудника из отдела в отдел. В случае перевода руководителя,
+переводятся все его подчинённые.
+
+update  staff set parent = nameid('имя нового начальника') where name = 'имя сотрудника'//
+
+3. Вывести отдел - начальник, все непосредственные подчинённые
+
+create procedure department(pname varchar(32))
+begin
+	declare pid int;
+	set pid = nameid(pname);
+	select name from staff where id = pid or parent = pid;
+end//
+4. Вывести список всех "листовых" узлов дерева (сотрудники не имеющие
+подчинённых)
+
+
+
+create procedure leaf()
+begin 
+	create table psd select distinct parent from staff;
+	alter table psd change column parent parent int primary key not null;
+	select name from staff where id not in (select parent from psd);
+	drop table psd;
+end //
+5. Вывести список подчинения - руководитель, руководитель руководителя,
+и т.д. до вершины иерархии
+
+
+create procedure rootpath(myname varchar(32))
+begin 
+	declare i int;
+	declare i0 int;
+	declare nm varchar(32);
+	set i = nameid(myname);
+	set i0 = i;
+	create table res(id int primary key unique auto_increment, name varchar(32));
+	lp: while i != -1 do
+		select name into nm from staff where id = i;
+		insert into res values(null, nm);
+		select parent into i from staff where id = i;
+		if i = i0 then 
+			select "Inheritance error";
+			leave lp;
+		end if;
+	end while;
+	select name from res order by id desc;
+	drop table res; 
+end//
+		
+6. Вывести количество сотрудников в отделе
+
+create function department_size(pname varchar(32)) returns int
+begin
+	declare pid int;
+	declare res int;
+	set pid = nameid(pname);
+	select count(*) into res from staff where id = pid or parent = pid;
+	return res;
+end//
+
+
+7. Проверить граф подчинения на отсутствие аномалий (двойное подчинение,
+отсутствие руководителя и т.д.).
+
+create function check_graph() returns varchar(32)
+begin 
+	declare processing int default TRUE;
+	declare a, b int;
+	declare cur cursor for select id, parent from staff;
+	DECLARE CONTINUE HANDLER FOR NOT FOUND SET processing = FALSE;
+	open cur;
+	fetch cur into a, b;
+	while processing do
+		fetch cur into a, b;
+		if a <= b or b is null then
+			return CONCAT("Error: id=", CONV(a,10,10));
+		end if;
+	end while;
+	close cur;
+	return "Ok";
+end//
+
+8. Вывести "ранг" сотрудника - глубину подчинения
+
+create function rank(myname varchar(32)) returns int
+begin 
+	declare i int;
+	declare i0 int;
+	declare ans int default 0;
+	set i = nameid(myname);
+	set i0 = i;
+	lp: while i != -1 do
+		set ans = ans + 1;
+		select parent into i from staff where id = i;
+		if i = i0 then 
+			return -1;
+		end if;
+	end while;
+	return ans-1;
+end//
+9. Вывести иерархию в графическом виде (одно значение - на одной
+строке, отсортировано в порядке подчинения, количество отступов
+перед именем сотрудника - степень подчинения в иерархии 
+
+тут лучше написать на си, ведь работает очень медленно
+
+
+
+
+10. Вывести "путь" между двумя сотрудниками - всех непосредственных и 
+промежуточных руководителей сотрудников.
+create procedure path(name1 varchar(32), name2 varchar(32))
+begin 
+	declare a, b int;
+	declare sname varchar(32);
+	create table aname(id int, s varchar(32));
+	create table bname(id int, s varchar(32));
+	set a = nameid(name1);
+	set b = nameid(name2);
+	while a != b do 
+		if a > b then 
+			select name into sname from staff where id = a;
+			insert	aname values(a, sname);
+			select parent into a from staff where id = a;
+		else 
+			select name into sname from staff where id = b;
+			insert	bname values(b, sname);
+			select parent into b from staff where id = b;
+		end if;
+	end while;
+	select name into sname from staff where id = a;
+	insert	aname values(a, sname);
+	insert aname select * from bname order by id;
+	select s from aname;
+	drop table aname;
+	drop table bname;	
+end//
+
+delimiter ;
